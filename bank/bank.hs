@@ -1,7 +1,22 @@
 module Bank where
 
--- Define the BankOp monad
-newtype BankOp a = BankOp { runBankOp :: Float -> (a, Float) }
+newtype BankOp a = BankOp (Float -> (a, Float))
+
+deposit :: Float -> BankOp ()
+deposit amount = BankOp $ \balance -> ((), balance + amount)
+
+withdraw :: Float -> BankOp Float
+withdraw amount = BankOp $ \balance ->
+    let newBalance = balance - amount
+        actualWithdrawn = if newBalance < -100 then balance + 100 else amount
+    in (actualWithdrawn, max newBalance (-100))
+
+getBalance :: BankOp Float
+getBalance = BankOp $ \balance -> (balance, balance)
+
+
+runBankOp :: BankOp a -> a
+runBankOp (BankOp f) = fst (f 0)
 
 instance Functor BankOp where
     fmap f (BankOp op) = BankOp $ \balance ->
@@ -9,33 +24,15 @@ instance Functor BankOp where
         in (f a, newBalance)
 
 instance Applicative BankOp where
-    pure a = BankOp $ \balance -> (a, balance)
-    BankOp f <*> BankOp a = BankOp $ \balance ->
-        let (g, balance') = f balance
-            (x, balance'') = a balance'
-        in (g x, balance'')
+    pure x = BankOp $ \balance -> (x, balance)
+    (BankOp f) <*> (BankOp x) = BankOp $ \balance ->
+        let (g, newBalance) = f balance
+            (a, finalBalance) = x newBalance
+        in (g a, finalBalance)
 
 instance Monad BankOp where
     return = pure
-    BankOp op >>= f = BankOp $ \balance ->
-        let (a, balance') = op balance
-            BankOp op' = f a
-        in op' balance'
-
--- Deposit operation
-deposit :: Float -> BankOp ()
-deposit amount = BankOp $ \balance -> ((), balance + amount)
-
--- Withdraw operation
-withdraw :: Float -> BankOp Float
-withdraw amount = BankOp $ \balance ->
-    let maxOverdraw = -100
-        newBalance = balance - amount
-        actualWithdrawal = if newBalance >= maxOverdraw
-                           then amount
-                           else balance - maxOverdraw
-    in (actualWithdrawal, balance - actualWithdrawal)
-
--- Get balance operation
-getBalance :: BankOp Float
-getBalance = BankOp $ \balance -> (balance, balance)
+    (BankOp x) >>= f = BankOp $ \balance ->
+        let (a, newBalance) = x balance
+            BankOp nextOp = f a
+        in nextOp newBalance
